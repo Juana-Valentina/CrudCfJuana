@@ -1,183 +1,255 @@
 const Product = require('../models/Products');
 const Category = require('../models/Category');
 const Subcategory = require('../models/Subcategory');
-     
+const { canCreate, canEdit, canDelete, canView } = require('../middlewares/role');
 
-exports.createProduct = async (req, res) => {
+// Crear producto (Admin y Coordinador)
+exports.createProduct = [canCreate, async (req, res) => {
     try {
-        const {name, description, price, stock, category, subcategory}  = req.body;
+        const { name, description, price, stock, category, subcategory } = req.body;
 
-        //Validacion de campos requridos
-        if (!name || !description || !price || !stock || !category || !subcategory) {
-
-            return res.status(400).json({
-                success:false,
-                message:'Todos los campos son obligatorios'
+        // Validación mejorada con mensajes descriptivos
+        if (!name?.trim()) {
+            return res.status(400).json({ 
+                success: false,
+                message: '❌ El nombre del producto es obligatorio.'
             });
-        }   
-        //Verificar que la categoria exista
-        
+        }
+
+        if (!description?.trim()) {
+            return res.status(400).json({ 
+                success: false,
+                message: '❌ La descripción es obligatoria.'
+            });
+        }
+
+        if (!price || price <= 0) {
+            return res.status(400).json({ 
+                success: false,
+                message: '❌ El precio debe ser mayor a cero.'
+            });
+        }
+
+        if (!stock || stock < 0) {
+            return res.status(400).json({ 
+                success: false,
+                message: '❌ El stock no puede ser negativo.'
+            });
+        }
+
+        if (!category) {
+            return res.status(400).json({
+                success: false,
+                message: '❌ La categoría es requerida.'
+            });
+        }
+
+        if (!subcategory) {
+            return res.status(400).json({
+                success: false,
+                message: '❌ La subcategoría es requerida.'
+            });
+        }
+
+        // Verificar que la categoría exista
         const categoryExists = await Category.findById(category);
         if (!categoryExists) {
             return res.status(404).json({
                 success: false,
-                message: 'La categoria no existe'
+                message: '🔍 La categoría no existe'
             });
         }
         
-        //verificar que la subcategoria exista y pertenezca a la categoria
+        // Verificar que la subcategoría exista y pertenezca a la categoría
         const subcategoryExists = await Subcategory.findOne({
             _id: subcategory,
             category: category
         });
-        if(!subcategoryExists){
+        if (!subcategoryExists) {
             return res.status(404).json({
                 success: false,
-                message:('La subcategoria no existe o no pertenece a la categoria especifica')
+                message: '🔍 La subcategoría no existe o no pertenece a la categoría especificada'
             });
         }
         
-        //crar  el producto sin el createBy temporalmente
+        // Verificar si el producto ya existe (case-insensitive)
+        const existingProduct = await Product.findOne({ 
+            name: { $regex: new RegExp(`^${name.trim()}$`, 'i') },
+            category,
+            subcategory
+        });
+
+        if (existingProduct) {
+            return res.status(400).json({
+                success: false,
+                message: '⚠️ Ya existe un producto con ese nombre en esta categoría y subcategoría'
+            });
+        }
+
+        // Crear el producto
         const product = new Product({
-            name,
-            description,
+            name: name.trim(),
+            description: description.trim(),
             price,
             stock,
             category,
-            subcategory
-            //createBy se asignara en el verificar usuarios
+            subcategory,
+            createdBy: req.user.id // Asignar el usuario que creó el producto
         });
 
-        //verificar si el usuario esta disponible en el request
-        if (req.user && req.user.id){
-            product.createdBy = req.user.id;
-        }
-
-        //Guardar en la base de datos
         const savedProduct = await product.save();
 
-        //Obtener el producto con los datos poblados
+        // Obtener el producto con los datos poblados
         const productWithDetails = await Product.findById(savedProduct.id)
-        .populate('category', 'name')
-        .populate('subcategory','name');
-
-        res.status(201).json({
-            success:true,
-            message:('producto creado exitosamente'),
-            data: productWithDetails
-        });
-    }catch (error) {
-        console.error('error en createdProduct;', error);
-
-        //manejo de erroes en mongoDB
-        if (error.code === 11000) {
-            return res.status(400).json({
-                success:false,
-                message:'Ya existe un producto con ese nombre'
-
-            });
-
-            }
-            res.status(500).json({
-                success:false,
-                message:'error al crear el producto',
-                error:  error.message
-            });
-        }
-    };
-
-    //Consulta de productos GET api/products
-    exports.getProducts = async (req, res) => {
-        try{
-            const products = await Product.find()
             .populate('category', 'name')
             .populate('subcategory', 'name')
-            .sort({createAt: -1});
-            
-            res.status(200).json({
-                success:true,
-                count: products.length,
-                data: products
+            .populate('createdBy', 'name email role');
 
-            });
-        }catch (error) {
-            console.error('Error en getProducts:', error);
-            res.status(500).json({
+        res.status(201).json({
+            success: true,
+            message: '✅ Producto creado exitosamente',
+            data: productWithDetails
+        });
+    } catch (error) {
+        console.error('Error en createProduct:', error);
+        
+        if (error.code === 11000) {
+            return res.status(400).json({
                 success: false,
-                message: 'Error al obtener los productos'
+                message: '❌ Ya existe un producto con ese nombre'
             });
         }
-    };
 
-
-exports.getProductById = async (req, res) => {
-    try {
-        const product = await Product.findById(req.params.id)
-            .populate('category', 'name description')
-            .populate('subcategory', 'name description');
-
-            if (!product) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'Producto no encontrado'
-                });
-            }
-
-            res.status(200).json({
-                success: true,
-                data: product
-            });
-    } catch (error) {
-        console.error('Error en getProductById:', error);
         res.status(500).json({
             success: false,
-            message: 'Error al obtener el producto',
+            message: '❌ Error al crear el producto',
             error: error.message
         });
     }
-};
+}];
 
-exports.updateProduct = async (req, res) => {
+// Obtener todos los productos (todos los roles)
+exports.getProducts = [canView, async (req, res) => {
     try {
-        const {name, description, price, stock, category, subcategory} = req.body;
-        const updateData = {};
+        const products = await Product.find()
+            .populate('category', 'name')
+            .populate('subcategory', 'name')
+            .populate('createdBy', 'name role')
+            .sort({ createdAt: -1 });
+            
+        res.status(200).json({
+            success: true,
+            count: products.length,
+            data: products
+        });
+    } catch (error) {
+        console.error('Error en getProducts:', error);
+        res.status(500).json({
+            success: false,
+            message: '❌ Error al obtener los productos',
+            error: error.message
+        });
+    }
+}];
 
-        //validar y prearar los datos para actualizacion
-        if (name) updateData.name = name;
-        if (description) updateData.description = description;
-        if (price) updateData.price = price;
-        if (stock) updateData.stock = stock;
-        if (category) updateData.category = category;
-        if (subcategory) updateData.subcategory = subcategory;
+// Obtener producto por ID (todos los roles)
+exports.getProductById = [canView, async (req, res) => {
+    try {
+        const product = await Product.findById(req.params.id)
+            .populate('category', 'name description')
+            .populate('subcategory', 'name description')
+            .populate('createdBy', 'name role');
 
-        //validar relaciones si se actualizan 
+        if (!product) {
+            return res.status(404).json({
+                success: false,
+                message: '🔍 Producto no encontrado'
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            data: product
+        });
+    } catch (error) {
+        console.error('Error en getProductById:', error);
+        
+        if (error.kind === 'ObjectId') {
+            return res.status(400).json({
+                success: false,
+                message: '❌ ID de producto inválido'
+            });
+        }
+
+        res.status(500).json({
+            success: false,
+            message: '❌ Error al obtener el producto',
+            error: error.message
+        });
+    }
+}];
+
+// Actualizar producto (Admin y Coordinador)
+exports.updateProduct = [canEdit, async (req, res) => {
+    try {
+        const { name, description, price, stock, category, subcategory } = req.body;
+        const updateData = { 
+            updatedBy: req.user.id // Registra quién actualizó
+        };
+
+        // Validar y preparar los datos para actualización
+        if (name?.trim()) {
+            // Verificar si el nuevo nombre ya existe (ignorando el caso actual)
+            const existing = await Product.findOne({
+                name: { $regex: new RegExp(`^${name.trim()}$`, 'i') },
+                _id: { $ne: req.params.id },
+                category: category || undefined,
+                subcategory: subcategory || undefined
+            });
+
+            if (existing) {
+                return res.status(400).json({
+                    success: false,
+                    message: '⚠️ Ya existe un producto con ese nombre en esta categoría y subcategoría'
+                });
+            }
+            updateData.name = name.trim();
+        }
+
+        if (description?.trim()) updateData.description = description.trim();
+        if (price !== undefined) updateData.price = price;
+        if (stock !== undefined) updateData.stock = stock;
+
+        // Validar relaciones si se actualizan
         if (category || subcategory) {
             if (category) {
-                const categoryExists  = await Category.findById(category);
+                const categoryExists = await Category.findById(category);
                 if (!categoryExists) {
                     return res.status(404).json({
                         success: false,
-                        message:'La categoria especificada no existe'
+                        message: '🔍 La categoría especificada no existe'
                     });
                 }
                 updateData.category = category;
             }
+            
             if (subcategory) {
+                const catId = category || (await Product.findById(req.params.id)).category;
                 const subcategoryExists = await Subcategory.findOne({
                     _id: subcategory,
-                    category: category || updateData.category
+                    category: catId
                 });
                 if (!subcategoryExists) {
                     return res.status(404).json({
                         success: false,
-                        message: 'La subcategoria especificada no existe o no pertenece a la categoria especifica'
+                        message: '🔍 La subcategoría especificada no existe o no pertenece a la categoría'
                     });
                 }
                 updateData.subcategory = subcategory;
             }
         }
 
-        //Actualizar producto
+        // Actualizar producto
         const updatedProduct = await Product.findByIdAndUpdate(
             req.params.id,
             updateData,
@@ -187,51 +259,70 @@ exports.updateProduct = async (req, res) => {
             }
         )
         .populate('category', 'name')
-        .populate('subcategory', 'name');
+        .populate('subcategory', 'name')
+        .populate('updatedBy', 'name role');
         
-        if (!this.updateProduct){
+        if (!updatedProduct) {
             return res.status(404).json({
                 success: false,
-                message: 'Producto no encontrado'
+                message: '🔍 Producto no encontrado'
             });
         }
 
         res.status(200).json({
             success: true,
-            message: 'Producto actualizado exitosamente',
+            message: '🔄 Producto actualizado exitosamente',
             data: updatedProduct
         });
-
     } catch (error) {
         console.error('Error en updateProduct:', error);
+        
+        if (error.kind === 'ObjectId') {
+            return res.status(400).json({
+                success: false,
+                message: '❌ ID de producto inválido'
+            });
+        }
+
         res.status(500).json({
             success: false,
-            message: 'Error al actualizar el producto',
+            message: '❌ Error al actualizar el producto',
+            error: error.message
         });
     }
-};
+}];
 
-exports.deleteProduct = async (req, res) => {
+// Eliminar producto (Solo Admin)
+exports.deleteProduct = [canDelete, async (req, res) => {
     try {
-        const product = await Product.findByIdAndDelete(req.params.id);
+        const deletedProduct = await Product.findByIdAndDelete(req.params.id);
         
-        if (!product) {
+        if (!deletedProduct) {
             return res.status(404).json({
                 success: false,
-                message: 'Producto no encontrado'
+                message: '🔍 Producto no encontrado'
             });
         }
 
         res.status(200).json({
             success: true,
-            message: 'Producto eliminado exitosamente',
-            data: product
+            message: '🗑️ Producto eliminado exitosamente',
+            data: deletedProduct
         });
     } catch (error) {
         console.error('Error en deleteProduct:', error);
+        
+        if (error.kind === 'ObjectId') {
+            return res.status(400).json({
+                success: false,
+                message: '❌ ID de producto inválido'
+            });
+        }
+
         res.status(500).json({
             success: false,
-            message: 'Error al eliminar el producto',
+            message: '❌ Error al eliminar el producto',
+            error: error.message
         });
     }
-};
+}];
