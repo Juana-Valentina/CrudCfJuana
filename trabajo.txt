@@ -1,0 +1,14 @@
+1. Realizar las pruebas postman de user x 3 usuarios
+2. Realizar las pruebas postman de category 3 usuarios
+3. Realizar las pruebas postman de subcategoria 3 usuarios
+4. Realizar las pruebas poastman de producto 3 usuarios
+5. Deve realizar que se cumpla con los roles
+5.1 Admin crud ok
+5.2 Coordinador crear, consultar, modificar
+5.3 Auxiliar consultar
+6. RECUERDE QUE LAS PRUEBAS SON
+6.1 CREAR
+6.2 CONSULTAR
+6.3 CONSULTAR X ID
+6.4 MODIFICAR
+6.5 ELIMINAR
